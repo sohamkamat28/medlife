@@ -1,230 +1,376 @@
-# app.py
 import base64
-from dash import Dash ,dcc, html , Input , Output, callback , dash_table, callback_context
 import io
-from PIL import Image
-from ocr_handler import extract_text
-from ner_model import analyze_text
-from data_handler import get_definition # Assuming DEFINITION_NOT_FOUND is still defined in data_handler
+import mimetypes
 import os
 import time
 
-app = Dash(__name__, suppress_callback_exceptions=True)
+from dash import Dash, Input, Output, State, callback_context, dash_table, dcc, html
+from PIL import Image
 
-# Define the new color palette for depth
-DARK_GREEN_BG = '#E8F5E9' # Darker green for overall page background
-LIGHT_GREEN_BOX = '#FFFFFF' # White or very light green for the content box
-PASTEL_ACCENT = '#8DD7BF' # Mint green accent
-PASTEL_STRIPE = '#F0FFF0'
-TEXT_COLOR = '#333333'
+from data_handler import DEFINITION_NOT_FOUND, GLOSSARY_DATA, get_definition, normalize_term, resolve_definition
+from ner_model import analyze_text
+from ocr_handler import extract_text
 
-app.title = "Medical Report Analyzer"
 
-# Header Bar Layout
-header_bar = html.Div(
-    "Medical Report Analyzer",
-    style={
-        'backgroundColor': PASTEL_ACCENT,
-        'color': TEXT_COLOR,
-        'fontSize': '28px',
-        'fontWeight': '700',
-        'padding': '15px 0',
-        'textAlign': 'center',
-        'boxShadow': '0 2px 4px rgba(0, 0, 0, 0.1)',
-        'position': 'sticky',
-        'top': '0',
-        'zIndex': '1000',
-        'fontFamily': 'Inter, sans-serif',
-        'borderBottom': f'3px solid {TEXT_COLOR}'
-    }
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FALLBACK_DEFINITION = "Detected by the medical NER model. A simplified glossary definition is not available yet."
+
+app = Dash(
+    __name__,
+    suppress_callback_exceptions=True,
+    meta_tags=[
+        {"name": "viewport", "content": "width=device-width, initial-scale=1"},
+        {
+            "name": "description",
+            "content": "MedLife analyzes medical report text and images with OCR, NER, and glossary-backed definitions.",
+        },
+    ],
 )
+server = app.server
+app.title = "MedLife | Medical report analyzer"
+
+
+def _local_image_data_uri(relative_path: str) -> str | None:
+    image_path = os.path.join(BASE_DIR, relative_path)
+
+    if not os.path.exists(image_path):
+        return None
+
+    mime_type, _ = mimetypes.guess_type(image_path)
+    mime_type = mime_type or "image/png"
+
+    with open(image_path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("utf-8")
+
+    return f"data:{mime_type};base64,{encoded}"
+
+
+REPORT_PREVIEW_SRC = _local_image_data_uri("test/test2.png")
+
+
+def nav_link(label: str, href: str) -> html.A:
+    return html.A(label, href=href, className="nav-link")
+
+
+def metric(label: str, value: str) -> html.Div:
+    return html.Div([
+        html.Span(value, className="metric-value"),
+        html.Span(label, className="metric-label"),
+    ], className="metric")
+
+
+def notice(kind: str, title: str, body: str = "") -> html.Div:
+    children = [html.Strong(title)]
+    if body:
+        children.append(html.Span(body))
+
+    return html.Div(children, className=f"notice notice--{kind}")
+
+
+def format_label(label: str) -> str:
+    if label == "Glossary Match":
+        return "Glossary"
+
+    return str(label).replace("_", " ").replace("-", " ").title()
+
+
+def display_entity(word: str) -> str:
+    record = resolve_definition(word)
+    if record:
+        return record["entity"]
+
+    return str(word).strip()
+
+
+def result_table(table_data: list[dict]) -> html.Div:
+    return html.Div(
+        dash_table.DataTable(
+            columns=[{"name": column, "id": column} for column in ["Entity", "Label", "Definition"]],
+            data=table_data,
+            sort_action="native",
+            page_size=8,
+            style_as_list_view=True,
+            style_table={
+                "overflowX": "auto",
+                "border": "0",
+            },
+            style_cell={
+                "backgroundColor": "transparent",
+                "border": "0",
+                "color": "#26332f",
+                "fontFamily": "Outfit, ui-sans-serif, system-ui, sans-serif",
+                "fontSize": "15px",
+                "height": "auto",
+                "lineHeight": "1.55",
+                "maxWidth": "420px",
+                "minWidth": "120px",
+                "padding": "16px 14px",
+                "textAlign": "left",
+                "whiteSpace": "normal",
+            },
+            style_header={
+                "backgroundColor": "#e7efe9",
+                "border": "0",
+                "color": "#24342f",
+                "fontSize": "13px",
+                "fontWeight": "700",
+                "letterSpacing": "0.04em",
+                "textTransform": "uppercase",
+            },
+            style_data_conditional=[
+                {
+                    "if": {"row_index": "odd"},
+                    "backgroundColor": "#f6f8f5",
+                },
+                {
+                    "if": {"column_id": "Label"},
+                    "color": "#17695f",
+                    "fontWeight": "700",
+                },
+                {
+                    "if": {"column_id": "Entity"},
+                    "fontWeight": "700",
+                },
+            ],
+        ),
+        className="result-data-table",
+    )
+
+
+def hero_visual() -> html.Div:
+    preview = (
+        html.Img(src=REPORT_PREVIEW_SRC, alt="Sample medical report text preview")
+        if REPORT_PREVIEW_SRC
+        else html.Div("Report preview", className="preview-fallback")
+    )
+
+    return html.Div([
+        html.Div([
+            html.Div([
+                html.Span("Report scan", className="eyebrow"),
+                html.Span("OCR ready", className="scan-status"),
+            ], className="preview-toolbar"),
+            html.Div(preview, className="preview-image"),
+            html.Div([
+                html.Div([html.Span("Patient"), html.Strong("Name detected")]),
+                html.Div([html.Span("Terms"), html.Strong("Glossary matched")]),
+                html.Div([html.Span("Output"), html.Strong("Readable table")]),
+            ], className="preview-stats"),
+        ], className="report-preview"),
+    ], className="hero-visual")
+
 
 app.layout = html.Div([
-    header_bar,
+    html.A("Skip to analyzer", href="#workspace", className="skip-link"),
 
-    html.Div([
-        html.H2("Analyze Your Medical Report", style={'color': TEXT_COLOR, 'marginBottom': '15px'}),
-        html.P("Enter text or upload an image report.", style={'color': TEXT_COLOR, 'marginBottom': '20px'}),
+    html.Header([
+        html.Nav([
+            html.A([
+                html.Span("M", className="brand-mark"),
+                html.Span("MedLife", className="brand-name"),
+            ], href="#top", className="brand"),
+            html.Div([
+                nav_link("Analyzer", "#workspace"),
+                nav_link("Results", "#results"),
+                nav_link("Glossary", "#results"),
+            ], className="nav-links"),
+        ], className="top-nav"),
+    ], className="site-header", id="top"),
 
-        dcc.Upload(
-            id='upload-image',
-            children=html.Div(['📤 Drag and drop or click to upload an image']),
-            style={
-                'width': '100%', 'height': '60px', 'lineHeight': '60px',
-                'borderWidth': '2px', 'borderStyle': 'dashed',
-                'borderColor': PASTEL_ACCENT,
-                'borderRadius': '10px', 'textAlign': 'center', 'marginBottom': '15px',
-                'cursor': 'pointer', 'backgroundColor': LIGHT_GREEN_BOX, 'color': TEXT_COLOR
-            }
-        ),
+    html.Main([
+        html.Section([
+            html.Div([
+                html.P("Medical report analyzer", className="eyebrow"),
+                html.H1("Read reports faster, without losing the clinical context."),
+                html.P(
+                    "Upload a report image or paste text. MedLife extracts readable text, detects medical terms, and connects them to simplified glossary definitions.",
+                    className="hero-copy",
+                ),
+                html.Div([
+                    html.A("Start analysis", href="#workspace", className="button-link button-link--primary"),
+                    html.A("See output", href="#results", className="button-link button-link--secondary"),
+                ], className="hero-actions"),
+            ], className="hero-content"),
+            hero_visual(),
+        ], className="hero-section"),
 
-        dcc.Textarea(
-            id='input-text',
-            placeholder='Or type/paste your medical report here...',
-            style={
-                'width': '100%', 'height': 150, 'marginBottom': 20,
-                'borderRadius': '8px',
-                'border': f'1px solid {PASTEL_ACCENT}',
-                'padding': '10px',
-                'boxShadow': 'inset 0 1px 3px rgba(0, 0, 0, 0.05)',
-                'fontFamily': 'Inter, sans-serif',
-                'textAlign': 'left'
-            }
-        ),
+        html.Section([
+            metric("OCR paths", "3"),
+            metric("Glossary entries", str(len(GLOSSARY_DATA))),
+            metric("Inputs", "Text + image"),
+        ], className="metrics-strip", **{"aria-label": "Analyzer summary"}),
 
-        html.Div([
-            html.Button("Analyze Report", id='analyze-btn', style={
-                'backgroundColor': PASTEL_ACCENT,
-                'color': TEXT_COLOR,
-                'padding': '15px 40px',
-                'borderRadius': '10px',
-                'border': 'none',
-                'cursor': 'pointer',
-                'fontWeight': 'bold',
-                'fontSize': '18px',
-                'boxShadow': '0 6px 10px rgba(0, 0, 0, 0.15)',
-                'transition': 'background-color 0.3s',
-                'textTransform': 'uppercase',
-                'minWidth': '300px',
-                'display': 'inline-block'
-            }),
-        ], style={'textAlign': 'center', 'marginBottom': 20}),
+        html.Section([
+            html.Div([
+                html.P("Workspace", className="eyebrow"),
+                html.H2("Analyze a medical report"),
+                html.P(
+                    "The uploaded image text is placed into the report box first, so you can review it before running analysis.",
+                    className="section-copy",
+                ),
+            ], className="section-heading"),
 
-        html.Div(id='output', style={'marginTop': 30, 'fontFamily': 'Inter, sans-serif'})
+            html.Div([
+                html.Div([
+                    html.Label("Upload report image", className="field-label"),
+                    dcc.Upload(
+                        id="upload-image",
+                        children=html.Div([
+                            html.Span("Drop an image here", className="upload-title"),
+                            html.Span("PNG, JPG, or scanned report snippets", className="upload-subtitle"),
+                        ], className="upload-copy"),
+                        className="upload-zone",
+                        multiple=False,
+                    ),
+                ], className="input-panel input-panel--upload"),
 
-    ], style={
-        'backgroundColor': LIGHT_GREEN_BOX,
-        'padding': '30px',
-        'maxWidth': '800px',
-        'margin': '30px auto',
-        'borderRadius': '15px',
-        'boxShadow': '0 10px 30px rgba(0, 0, 0, 0.1)',
-        'textAlign': 'center',
-    }),
+                html.Div([
+                    html.Label("Report text", htmlFor="input-text", className="field-label"),
+                    dcc.Textarea(
+                        id="input-text",
+                        placeholder="Paste report text here, or upload an image to extract it automatically...",
+                        className="report-textarea",
+                        spellCheck=False,
+                    ),
+                ], className="input-panel input-panel--text"),
+            ], className="analyzer-grid"),
 
-], style={
-    'backgroundColor': DARK_GREEN_BG,
-    'minHeight': '100vh',
-    'fontFamily': 'Inter, sans-serif'
-})
+            html.Div([
+                html.Button("Analyze report", id="analyze-btn", className="analyze-button", n_clicks=0),
+                html.P("Educational support only. Always confirm findings with a qualified clinician.", className="fine-print"),
+            ], className="action-row"),
+        ], className="workspace-section", id="workspace"),
 
+        html.Section([
+            html.Div([
+                html.P("Results", className="eyebrow"),
+                html.H2("Detected terms"),
+            ], className="section-heading section-heading--compact"),
+            dcc.Loading(
+                id="loading-output",
+                type="dot",
+                color="#17695f",
+                children=html.Div(
+                    notice("empty", "No report analyzed yet", "Upload an image or paste text, then run analysis."),
+                    id="output",
+                    className="output-area",
+                ),
+            ),
+        ], className="results-section", id="results"),
+    ], className="site-main"),
 
-# Define the constant for missing definition (based on data_handler.py)
-DEFINITION_NOT_FOUND = "Glossary data not loaded."
+    html.Footer([
+        html.Span("MedLife"),
+        html.Span("Built for clear report review, not medical diagnosis."),
+    ], className="site-footer"),
+], className="site-shell")
+
 
 @app.callback(
-    Output('input-text', 'value', allow_duplicate=True),
-    Output('output', 'children'),
-    Input('analyze-btn', 'n_clicks'),
-    Input('input-text', 'value'),
-    Input('upload-image', 'contents'),
-    prevent_initial_call=True
+    Output("input-text", "value", allow_duplicate=True),
+    Output("output", "children"),
+    Input("analyze-btn", "n_clicks"),
+    Input("upload-image", "contents"),
+    State("input-text", "value"),
+    prevent_initial_call=True,
 )
-def analyze(n_clicks, text_input, image_data):
+def analyze(n_clicks, image_data, text_input):
     ctx = callback_context
     if not ctx.triggered:
         return text_input, html.Div()
 
-    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-
+    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
     current_text = text_input if text_input else ""
 
-    # --- 1. OCR & Upload Confirmation Triggered by dcc.Upload ---
-    if trigger_id == 'upload-image' and image_data is not None:
+    if trigger_id == "upload-image" and image_data is not None:
+        temp_path = ""
+
         try:
-            content_type, content_string = image_data.split(',')
+            _, content_string = image_data.split(",", 1)
             decoded = base64.b64decode(content_string)
 
-            temp_path = f"temp_upload_{time.time()}.png"
+            temp_path = f"temp_upload_{time.time_ns()}.png"
             image = Image.open(io.BytesIO(decoded))
             image.save(temp_path)
 
             ocr_text = extract_text(temp_path)
-            os.remove(temp_path)
+            error_prefixes = ("Tesseract executable", "Image file not found", "Error processing image")
 
-            confirm_message = html.Div("✅ Image uploaded and text extracted. Click 'Analyze Report'.",
-                                        style={'color': '#5cb85c', 'padding': '10px', 'border': '1px solid #5cb85c', 'borderRadius': '5px', 'backgroundColor': '#edf9ed', 'marginBottom': '20px'})
+            if not ocr_text.strip():
+                return current_text, notice("warning", "No text found", "Try a sharper image or paste the report text directly.")
 
-            return ocr_text, confirm_message
+            if ocr_text.startswith(error_prefixes):
+                return current_text, notice("error", "Image processing failed", ocr_text)
+
+            return ocr_text, notice("success", "Text extracted", "Review the report text, then run analysis.")
 
         except Exception as e:
-            error_message = f"🚨 Error processing image. Ensure required OCR dependencies are installed (e.g., pytesseract executable or easyocr): {e}"
-            error_div = html.Div(error_message, style={'color': '#d9534f', 'padding': '10px', 'border': '1px solid #d9534f', 'borderRadius': '5px', 'backgroundColor': '#f9eaea', 'marginBottom': '20px'})
-            return current_text, error_div
+            return current_text, notice("error", "Image processing failed", str(e))
 
-    # --- 2. Analysis Triggered by Button (`analyze-btn`) ---
-    elif trigger_id == 'analyze-btn':
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    if trigger_id == "analyze-btn":
         if not current_text.strip():
-            return current_text, html.Div("⚠️ Please enter text or upload an image.", style={'color': '#d9534f', 'padding': '10px', 'border': '1px solid #d9534f', 'borderRadius': '5px', 'backgroundColor': '#f9eaea', 'marginBottom': '20px'})
+            return current_text, notice("warning", "Report text is empty", "Paste text or upload an image first.")
 
         patient_name, results = analyze_text(current_text)
 
         if not results:
-            return current_text, html.Div("✅ No specialized medical terms found in the provided text.", style={'color': '#5cb85c', 'padding': '10px', 'border': '1px solid #5cb85c', 'borderRadius': '5px', 'backgroundColor': '#edf9ed'})
+            return current_text, notice(
+                "success",
+                "No specialized terms found",
+                "The report text was readable, but no glossary or biomedical NER matches were detected.",
+            )
 
-        # --- Generate Patient Card ---
-        display_name = patient_name.title() if patient_name else "Name Not Found"
-
-        patient_card = html.Div([
-            html.H4("Patient Information", style={'color': TEXT_COLOR, 'marginBottom': '5px', 'fontSize': '20px'}),
-            html.H3(display_name,
-                    style={'color': PASTEL_ACCENT, 'fontSize': '32px', 'fontWeight': 'bold', 'textTransform': 'uppercase'})
-        ], style={
-            'backgroundColor': PASTEL_STRIPE,
-            'padding': '15px 25px',
-            'borderRadius': '10px',
-            'marginBottom': '25px',
-            'border': f'2px solid {PASTEL_ACCENT}',
-            'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.08)'
-        })
-
-        # --- Prepare Table Data (with Filtering) ---
+        display_name = patient_name.title() if patient_name else "Name not found"
         table_data = []
+        seen_rows = set()
+
         for word, label in results:
+            entity = display_entity(word)
             definition = get_definition(word)
 
-            # --- NEW FILTERING LOGIC ---
             if definition == DEFINITION_NOT_FOUND:
+                definition = FALLBACK_DEFINITION
+
+            row_key = normalize_term(entity)
+            if not row_key or row_key in seen_rows:
                 continue
 
-            display_word = word.title() if label != "Abbreviation" else word.upper()
-
             table_data.append({
-                "Entity": display_word,
-                "Label": label,
-                "Definition": definition
+                "Entity": entity,
+                "Label": format_label(label),
+                "Definition": definition,
             })
+            seen_rows.add(row_key)
 
-        # Check if all entities were filtered out
         if not table_data:
-            return current_text, html.Div("✅ Medical terms were found, but none matched an entry in the simplified glossary.",
-                                          style={'color': '#5cb85c', 'padding': '10px', 'border': '1px solid #5cb85c', 'borderRadius': '5px', 'backgroundColor': '#edf9ed', 'marginBottom': '20px'})
+            return current_text, notice(
+                "success",
+                "No glossary matches found",
+                "The text was processed, but no recognized medical terms were available to display.",
+            )
 
-        # --- Return Output (Card + Table) ---
+        patient_card = html.Div([
+            html.Div([
+                html.Span("Patient", className="patient-label"),
+                html.Strong(display_name, className="patient-name"),
+            ]),
+            html.Div([
+                html.Span(str(len(table_data)), className="result-count"),
+                html.Span("terms detected", className="result-count-label"),
+            ], className="result-count-box"),
+        ], className="patient-summary")
+
         return current_text, html.Div([
             patient_card,
-            dash_table.DataTable(
-                columns=[{"name": i, "id": i} for i in ["Entity", "Label", "Definition"]],
-                data=table_data,
-                style_table={"overflowX": "auto", "border": f"1px solid {PASTEL_ACCENT}", "borderRadius": "8px", "boxShadow": "0 2px 8px rgba(0, 0, 0, 0.05)"},
-                style_cell={
-                    "textAlign": "left", "padding": "12px", "fontFamily": "Inter, sans-serif",
-                    "color": TEXT_COLOR, "whiteSpace": "normal", "height": "auto",
-                    "minWidth": "80px", "width": "150px", "maxWidth": "350px",
-                },
-                style_header={
-                    "backgroundColor": PASTEL_ACCENT, "color": TEXT_COLOR, "fontWeight": "bold",
-                    "fontSize": "16px", "borderBottom": f"2px solid {PASTEL_ACCENT}"
-                },
-                style_data_conditional=[
-                    {"if": {"column_id": "Label"}, "textAlign": "center", "fontWeight": "600"},
-                    {"if": {"row_index": "odd"}, "backgroundColor": PASTEL_STRIPE}
-                ],
-                page_size=10,
-                sort_action="native"
-            )
-        ], style={'textAlign': 'center'})
+            result_table(table_data),
+        ], className="results-panel")
 
     return current_text, html.Div()
-if __name__ == '__main__':
+
+
+if __name__ == "__main__":
     app.run(debug=True)
