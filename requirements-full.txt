@@ -2,3 +2,5 @@ dash
 pandas
 Pillow
 pytesseract
+torch
+transformers

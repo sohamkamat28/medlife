@@ -28,6 +28,12 @@ Install Python dependencies:
 pip install -r requirements.txt
 ```
 
+For the full local ML version with Transformer NER models:
+
+```bash
+pip install -r requirements-full.txt
+```
+
 Install the Tesseract executable separately:
 
 ```bash
@@ -47,3 +53,15 @@ python app.py
 ```
 
 The first run may take time because the Transformer models are downloaded by `transformers`.
+
+## Deploying on Vercel
+
+This repository includes `vercel.json` for Vercel deployment. Vercel serverless functions have a strict bundle-size limit, so the default `requirements.txt` intentionally excludes `torch` and `transformers`.
+
+On Vercel, MedLife runs with glossary-backed text analysis and disables the heavy Transformer models through:
+
+```bash
+MEDLIFE_ENABLE_TRANSFORMERS=0
+```
+
+For full Transformer accuracy, run locally or deploy to a platform with larger containers such as Render, Railway, or a VPS.

@@ -1,22 +1,34 @@
 import re
+import os
 from typing import List, Tuple
-
-from transformers import pipeline
 
 from data_handler import find_glossary_terms, normalize_term
 
 
-try:
-    med_ner_model = pipeline("ner", model="d4data/biomedical-ner-all", grouped_entities=True)
-except Exception as e:
-    print(f"Error loading biomedical NER model: {e}. Falling back to empty list.")
-    med_ner_model = lambda text: []
+ENABLE_TRANSFORMERS = os.getenv("MEDLIFE_ENABLE_TRANSFORMERS", "1").lower() not in {"0", "false", "no"}
 
-try:
-    name_ner_model = pipeline("ner", model="dslim/bert-base-NER", grouped_entities=True)
-except Exception as e:
-    print(f"Error loading name NER model: {e}. Falling back to empty list.")
-    name_ner_model = lambda text: []
+
+def _empty_model(text: str) -> list[dict]:
+    return []
+
+
+if ENABLE_TRANSFORMERS:
+    try:
+        from transformers import pipeline
+
+        med_ner_model = pipeline("ner", model="d4data/biomedical-ner-all", grouped_entities=True)
+    except Exception as e:
+        print(f"Error loading biomedical NER model: {e}. Falling back to glossary matching.")
+        med_ner_model = _empty_model
+
+    try:
+        name_ner_model = pipeline("ner", model="dslim/bert-base-NER", grouped_entities=True)
+    except Exception as e:
+        print(f"Error loading name NER model: {e}. Falling back to pattern matching.")
+        name_ner_model = _empty_model
+else:
+    med_ner_model = _empty_model
+    name_ner_model = _empty_model
 
 
 def _clean_entity_word(word: str) -> str:
@@ -44,8 +56,8 @@ def _extract_patient_name(text: str) -> str:
                 return name_candidate
 
     label_patterns = [
-        r"(?:patient\s*name|patient|name)\s*[:\-]\s*([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3})",
-        r"(?:pt\.?\s*name)\s*[:\-]\s*([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3})",
+        r"(?:patient\s*name|patient|name)\s*[:\-]\s*([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+){0,3})",
+        r"(?:pt\.?\s*name)\s*[:\-]\s*([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+){0,3})",
     ]
 
     for pattern in label_patterns:
