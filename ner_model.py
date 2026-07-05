@@ -37,6 +37,28 @@ def _clean_entity_word(word: str) -> str:
     return cleaned.strip()
 
 
+def _clean_name_candidate(name: str) -> str:
+    candidate = _clean_entity_word(name)
+    candidate = re.split(
+        r"\b(?:experienced|presented|reported|complained|diagnosed|examined|showed|revealed|was|is|has|had|with|for)\b",
+        candidate,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    candidate = _clean_entity_word(candidate)
+
+    words = [
+        word
+        for word in candidate.split()
+        if len(word) > 1 and word.lower() not in {"the", "patient", "named", "name"}
+    ]
+
+    if not words:
+        return ""
+
+    return " ".join(words[:4])
+
+
 def _run_model(model, text: str) -> list[dict]:
     try:
         results = model(text)
@@ -47,25 +69,31 @@ def _run_model(model, text: str) -> list[dict]:
 
 
 def _extract_patient_name(text: str) -> str:
-    name_results = _run_model(name_ner_model, text)
-
-    for result in name_results:
-        if result.get("entity_group") == "PER":
-            name_candidate = _clean_entity_word(result.get("word", ""))
-            if len(name_candidate) > 2:
-                return name_candidate
-
     label_patterns = [
         r"(?:patient\s*name|patient|name)\s*[:\-]\s*([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+){0,3})",
         r"(?:pt\.?\s*name)\s*[:\-]\s*([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+){0,3})",
+        r"(?:the\s+)?patient\s+(?:named|called)\s+([A-Z][A-Za-z'-]+(?:\s+[A-Za-z][A-Za-z'-]+){0,3})",
+        r"(?:the\s+)?patient\s+is\s+([A-Z][A-Za-z'-]+(?:\s+[A-Za-z][A-Za-z'-]+){0,3})",
     ]
 
     for pattern in label_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            candidate = _clean_entity_word(match.group(1))
+            candidate = _clean_name_candidate(match.group(1))
             if len(candidate) > 2:
                 return candidate
+
+    name_results = _run_model(name_ner_model, text)
+    person_tokens = []
+
+    for result in name_results:
+        if result.get("entity_group") == "PER":
+            name_candidate = _clean_name_candidate(result.get("word", ""))
+            if name_candidate:
+                person_tokens.append(name_candidate)
+
+    if person_tokens:
+        return _clean_name_candidate(" ".join(person_tokens))
 
     return ""
 
