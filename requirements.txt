@@ -1,4 +1,2 @@
 dash
 pandas
-Pillow
-pytesseract

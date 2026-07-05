@@ -1,16 +1,11 @@
 import base64
-import io
 import mimetypes
 import os
-import tempfile
-import time
 
-from dash import Dash, Input, Output, State, callback_context, dash_table, dcc, html
-from PIL import Image
+from dash import ClientsideFunction, Dash, Input, Output, State, callback_context, dash_table, dcc, html
 
 from data_handler import DEFINITION_NOT_FOUND, GLOSSARY_DATA, get_definition, normalize_term, resolve_definition
 from ner_model import analyze_text
-from ocr_handler import OCR_UNAVAILABLE, extract_text
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -269,55 +264,18 @@ dash_app.layout = html.Div([
 
 @dash_app.callback(
     Output("input-text", "value", allow_duplicate=True),
-    Output("output", "children"),
+    Output("output", "children", allow_duplicate=True),
     Input("analyze-btn", "n_clicks"),
-    Input("upload-image", "contents"),
     State("input-text", "value"),
     prevent_initial_call=True,
 )
-def analyze(n_clicks, image_data, text_input):
+def analyze(n_clicks, text_input):
     ctx = callback_context
     if not ctx.triggered:
         return text_input, html.Div()
 
     trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
     current_text = text_input if text_input else ""
-
-    if trigger_id == "upload-image" and image_data is not None:
-        temp_path = ""
-
-        try:
-            _, content_string = image_data.split(",", 1)
-            decoded = base64.b64decode(content_string)
-
-            temp_path = os.path.join(tempfile.gettempdir(), f"temp_upload_{time.time_ns()}.png")
-            image = Image.open(io.BytesIO(decoded))
-            image.save(temp_path)
-
-            ocr_text = extract_text(temp_path)
-            error_prefixes = ("Tesseract executable", "Image file not found", "Error processing image")
-
-            if ocr_text == OCR_UNAVAILABLE:
-                return current_text, notice(
-                    "warning",
-                    "OCR is unavailable on this hosted deployment",
-                    "Vercel does not include the Tesseract system binary. Paste the report text into the text box, or run the project locally for image OCR.",
-                )
-
-            if not ocr_text.strip():
-                return current_text, notice("warning", "No text found", "Try a sharper image or paste the report text directly.")
-
-            if ocr_text.startswith(error_prefixes):
-                return current_text, notice("error", "Image processing failed", ocr_text)
-
-            return ocr_text, notice("success", "Text extracted", "Review the report text, then run analysis.")
-
-        except Exception as e:
-            return current_text, notice("error", "Image processing failed", str(e))
-
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
 
     if trigger_id == "analyze-btn":
         if not current_text.strip():
@@ -378,6 +336,16 @@ def analyze(n_clicks, image_data, text_input):
         ], className="results-panel")
 
     return current_text, html.Div()
+
+
+dash_app.clientside_callback(
+    ClientsideFunction(namespace="medlife_ocr", function_name="extractTextFromUpload"),
+    Output("input-text", "value", allow_duplicate=True),
+    Output("output", "children", allow_duplicate=True),
+    Input("upload-image", "contents"),
+    State("input-text", "value"),
+    prevent_initial_call=True,
+)
 
 
 if __name__ == "__main__":
