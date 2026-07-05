@@ -1,12 +1,28 @@
 import os
+import shutil
 
-import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
+try:
+    import pytesseract
+except ModuleNotFoundError:
+    pytesseract = None
 
+OCR_UNAVAILABLE = "OCR_UNAVAILABLE"
 tesseract_cmd = os.getenv("TESSERACT_CMD")
-if tesseract_cmd:
+if tesseract_cmd and pytesseract is not None:
     pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+
+def _has_tesseract() -> bool:
+    if pytesseract is None:
+        return False
+
+    configured_cmd = os.getenv("TESSERACT_CMD")
+    if configured_cmd:
+        return os.path.exists(configured_cmd)
+
+    return shutil.which("tesseract") is not None
 
 
 OCR_CONFIGS = [
@@ -61,6 +77,9 @@ def extract_text(image_path: str) -> str:
     if not os.path.exists(image_path):
         return "Image file not found on disk for OCR processing."
 
+    if not _has_tesseract():
+        return OCR_UNAVAILABLE
+
     try:
         image = Image.open(image_path)
         best_text = ""
@@ -78,7 +97,7 @@ def extract_text(image_path: str) -> str:
         return best_text.strip()
 
     except pytesseract.TesseractNotFoundError:
-        return "Tesseract executable not found. Please install Tesseract or set TESSERACT_CMD."
+        return OCR_UNAVAILABLE
 
     except Exception as e:
         return f"Error processing image: {type(e).__name__}: {e}"

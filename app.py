@@ -10,7 +10,7 @@ from PIL import Image
 
 from data_handler import DEFINITION_NOT_FOUND, GLOSSARY_DATA, get_definition, normalize_term, resolve_definition
 from ner_model import analyze_text
-from ocr_handler import extract_text
+from ocr_handler import OCR_UNAVAILABLE, extract_text
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -296,6 +296,13 @@ def analyze(n_clicks, image_data, text_input):
 
             ocr_text = extract_text(temp_path)
             error_prefixes = ("Tesseract executable", "Image file not found", "Error processing image")
+
+            if ocr_text == OCR_UNAVAILABLE:
+                return current_text, notice(
+                    "warning",
+                    "OCR is unavailable on this hosted deployment",
+                    "Vercel does not include the Tesseract system binary. Paste the report text into the text box, or run the project locally for image OCR.",
+                )
 
             if not ocr_text.strip():
                 return current_text, notice("warning", "No text found", "Try a sharper image or paste the report text directly.")
