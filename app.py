@@ -2,6 +2,7 @@ import base64
 import io
 import mimetypes
 import os
+import tempfile
 import time
 
 from dash import Dash, Input, Output, State, callback_context, dash_table, dcc, html
@@ -289,7 +290,7 @@ def analyze(n_clicks, image_data, text_input):
             _, content_string = image_data.split(",", 1)
             decoded = base64.b64decode(content_string)
 
-            temp_path = f"temp_upload_{time.time_ns()}.png"
+            temp_path = os.path.join(tempfile.gettempdir(), f"temp_upload_{time.time_ns()}.png")
             image = Image.open(io.BytesIO(decoded))
             image.save(temp_path)
 
