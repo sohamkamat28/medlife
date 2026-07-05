@@ -15,7 +15,7 @@ from ocr_handler import extract_text
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FALLBACK_DEFINITION = "Detected by the medical NER model. A simplified glossary definition is not available yet."
 
-app = Dash(
+dash_app = Dash(
     __name__,
     suppress_callback_exceptions=True,
     meta_tags=[
@@ -26,8 +26,8 @@ app = Dash(
         },
     ],
 )
-server = app.server
-app.title = "MedLife | Medical report analyzer"
+app = dash_app.server
+dash_app.title = "MedLife | Medical report analyzer"
 
 
 def _local_image_data_uri(relative_path: str) -> str | None:
@@ -160,7 +160,7 @@ def hero_visual() -> html.Div:
     ], className="hero-visual")
 
 
-app.layout = html.Div([
+dash_app.layout = html.Div([
     html.A("Skip to analyzer", href="#workspace", className="skip-link"),
 
     html.Header([
@@ -266,7 +266,7 @@ app.layout = html.Div([
 ], className="site-shell")
 
 
-@app.callback(
+@dash_app.callback(
     Output("input-text", "value", allow_duplicate=True),
     Output("output", "children"),
     Input("analyze-btn", "n_clicks"),
@@ -373,4 +373,4 @@ def analyze(n_clicks, image_data, text_input):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    dash_app.run(debug=True)
