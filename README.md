@@ -10,6 +10,14 @@ MedLife is a Dash web app for analyzing medical report text or report images. It
 - Patient name detection using `dslim/bert-base-NER`.
 - Glossary-backed definitions displayed in a searchable Dash table.
 
+## Interface and delivery
+
+- Server-rendered marketing shell so the headline and hero image appear before the Dash client bundle finishes loading.
+- Responsive, locally hosted WebP hero imagery with explicit dimensions to prevent layout shift.
+- Self-hosted Geist variable font, system-aware light and dark themes, keyboard focus states, and reduced-motion support.
+- Custom empty, loading, warning, error, and successful results states.
+- Search metadata, Open Graph tags, a sitemap, `robots.txt`, and `llms.txt` for discovery.
+
 ## Project Structure
 
 - `app.py` - Dash UI and callbacks.
