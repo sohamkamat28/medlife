@@ -1,3 +1,5 @@
+import mimetypes
+
 from dash import (
     ClientsideFunction,
     Dash,
@@ -9,7 +11,7 @@ from dash import (
     dcc,
     html,
 )
-from flask import Response
+from flask import Response, request
 
 from data_handler import (
     DEFINITION_NOT_FOUND,
@@ -23,6 +25,8 @@ from ner_model import analyze_text
 FALLBACK_DEFINITION = "Detected by the medical NER model. A simplified glossary definition is not available yet."
 SITE_URL = "https://medlife-topaz.vercel.app"
 SITE_DESCRIPTION = "Upload a medical report or paste its text to find key terms and clear, glossary-backed definitions with MedLife."
+
+mimetypes.add_type("font/woff2", ".woff2")
 
 dash_app = Dash(
     __name__,
@@ -180,6 +184,18 @@ def llms_txt() -> Response:
 MedLife is educational support. It does not diagnose conditions or replace advice from a qualified clinician.
 """
     return Response(content, mimetype="text/plain")
+
+
+@app.after_request
+def add_response_headers(response: Response) -> Response:
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+
+    if request.path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+    return response
 
 
 def notice(kind: str, title: str, body: str = "") -> html.Div:
