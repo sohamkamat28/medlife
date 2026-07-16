@@ -1,3 +1,35 @@
+(() => {
+  const applyUploadLabel = () => {
+    const input = document.querySelector("#upload-image input[type='file']");
+    if (!input) {
+      return false;
+    }
+
+    input.setAttribute("aria-labelledby", "upload-label");
+    return true;
+  };
+
+  const start = () => {
+    if (applyUploadLabel()) {
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      if (applyUploadLabel()) {
+        observer.disconnect();
+      }
+    });
+
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+})();
+
 window.dash_clientside = Object.assign({}, window.dash_clientside, {
   medlife_ocr: {
     extractTextFromUpload: async function (contents, currentText) {
